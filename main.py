@@ -1,25 +1,23 @@
 import requests
 import re
+import time
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-from requests.adapters import HTTPAdapter
-from urllib3.util.retry import Retry
 
 app = Flask(__name__)
 CORS(app)
 
-# আপনার নতুন বাংলাদেশ প্রক্সি সেটিংস (Updated)
+# আপনার প্রক্সি সেটিংস
 PROXY_URL = "http://juelranahfs9-zone-abc-region-bd:kCAB1hppXyT@43.159.29.144:4950"
 PROXIES = {"http": PROXY_URL, "https": PROXY_URL}
 
 @app.route('/')
 def home():
     try:
-        # প্রক্সি আইপি চেক করার জন্য টেস্ট রিকোয়েস্ট
-        test_res = requests.get("https://ifconfig.me", proxies=PROXIES, timeout=10)
-        return f"Server is Running with BD Proxy! Your Proxy IP: {test_res.text}"
+        test_res = requests.get("https://api.ipify.org?format=json", proxies=PROXIES, timeout=10)
+        return f"Server Active! IP: {test_res.json()['ip']} (Region: BD)"
     except:
-        return "Server is Running, but Proxy Connection Failed!"
+        return "Server Active, but Proxy Connection Failed!"
 
 @app.route('/login', methods=['POST'])
 def login():
@@ -28,77 +26,61 @@ def login():
         uid = data.get('uid')
         password = data.get('password')
 
-        if not uid or not password:
-            return jsonify({"status": "error", "message": "UID/Pass missing"})
-
         session = requests.Session()
-        # রিট্রাই লজিক (যাতে কানেকশন ড্রপ না হয়)
-        retry = Retry(connect=3, backoff_factor=0.5)
-        adapter = HTTPAdapter(max_retries=retry)
-        session.mount('http://', adapter)
-        session.mount('https://', adapter)
-        
         session.proxies.update(PROXIES)
 
-        # হাই-কোয়ালিটি অ্যান্ড্রয়েড হেডার
+        # হাই-কোয়ালিটি রিয়েল ইউজার এজেন্ট
+        ua = "Mozilla/5.0 (Linux; Android 12; Pixel 6 Build/SD1A.210817.036; wv) AppleWebKit/537.36 (KHTML, like Gecko) Version/4.0 Chrome/103.0.5060.129 Mobile Safari/537.36 [FB_IAB/FB4A;FBAV/375.1.0.28.115;]"
+        
         headers = {
-            'Authority': 'm.facebook.com',
-            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
-            'Accept-Language': 'bn-BD,bn;q=0.9,en-US;q=0.8,en;q=0.7',
-            'Cache-Control': 'max-age=0',
-            'Sec-Ch-Ua': '"Not.A/Brand";v="8", "Chromium";v="114", "Google Chrome";v="114"',
-            'Sec-Ch-Ua-Mobile': '?1',
-            'Sec-Ch-Ua-Platform': '"Android"',
-            'Sec-Fetch-Dest': 'document',
-            'Sec-Fetch-Mode': 'navigate',
-            'Sec-Fetch-Site': 'none',
-            'Sec-Fetch-User': '?1',
-            'Upgrade-Insecure-Requests': '1',
-            'User-Agent': 'Mozilla/5.0 (Linux; Android 13; SM-S918B) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/114.0.0.0 Mobile Safari/537.36',
+            'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
+            'accept-language': 'bn-BD,bn;q=0.9,en-US;q=0.8,en;q=0.7',
+            'origin': 'https://mbasic.facebook.com',
+            'referer': 'https://mbasic.facebook.com/login.php',
+            'user-agent': ua,
         }
+
+        # ১. mbasic লগইন পেজ ভিজিট করা
+        res1 = session.get("https://mbasic.facebook.com/login.php", headers=headers, timeout=15)
         
-        # ১. লগইন পেজ থেকে টোকেন সংগ্রহ
-        res1 = session.get("https://m.facebook.com/login.php", headers=headers, timeout=20)
-        
-        lsd = re.search('name="lsd" value="(.*?)"', res1.text)
-        jazoest = re.search('name="jazoest" value="(.*?)"', res1.text)
-        
-        if not lsd:
-            return jsonify({"status": "error", "message": "Facebook Blocked! Try rotating proxy IP."})
-            
+        # সব হিডেন ফিল্ড অটোমেটিক খুঁজে বের করা
         payload = {
-            'lsd': lsd.group(1),
-            'jazoest': jazoest.group(1),
             'email': uid,
             'pass': password,
             'login': 'Log In'
         }
-
-        # ২. লগইন সাবমিট
-        headers['Origin'] = 'https://m.facebook.com'
-        headers['Referer'] = 'https://m.facebook.com/login.php'
         
+        # Regex দিয়ে সব সিকিউরিটি ফিল্ড (lsd, jazoest, etc) সংগ্রহ
+        reg = re.findall(r'name="(.*?)" value="(.*?)"', res1.text)
+        for name, value in reg:
+            if name not in ['email', 'pass']:
+                payload[name] = value
+
+        # ২. লগইন সাবমিট করা
         response = session.post(
-            "https://m.facebook.com/login.php", 
+            "https://mbasic.facebook.com/login.php", 
             data=payload, 
-            headers=headers,
+            headers=headers, 
             allow_redirects=True,
-            timeout=25
+            timeout=20
         )
 
         cookies = session.cookies.get_dict()
         
         if "c_user" in cookies:
-            # সাকসেসফুল হলে সব কুকি সাজানো
+            # সাকসেসফুলি কুকি পাওয়া গেলে সাজানো
             cookie_str = "; ".join([f"{k}={v}" for k, v in cookies.items()])
             return jsonify({"status": "success", "cookie": cookie_str})
         elif "checkpoint" in cookies or "checkpoint" in response.url:
-            return jsonify({"status": "error", "message": "Checkpoint! Please approve in FB app."})
+            return jsonify({"status": "error", "message": "Checkpoint! Approve in FB app."})
         else:
-            return jsonify({"status": "error", "message": "Login Failed. Check UID/Pass."})
+            # যদি ব্লক করে, তবে মেইন সাইটে মেসেজ কি আছে চেক করা
+            if "blocked" in response.text.lower() or "suspicious" in response.text.lower():
+                return jsonify({"status": "error", "message": "Facebook Blocked Proxy! Change Proxy IP."})
+            return jsonify({"status": "error", "message": "Incorrect Password or Locked ID."})
 
     except Exception as e:
-        return jsonify({"status": "error", "message": f"Server Error: {str(e)[:40]}"})
+        return jsonify({"status": "error", "message": "Connection slow! Try again."})
 
 if __name__ == '__main__':
     app.run()
