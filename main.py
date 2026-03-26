@@ -6,9 +6,15 @@ from flask_cors import CORS
 app = Flask(__name__)
 CORS(app)
 
+# আপনার প্রক্সি সেটিংস (স্ক্রিনশট অনুযায়ী)
+PROXIES = {
+    "http": "http://juelranahfs9-zone-abc-region-OM:kCAB1hppXyT@43.159.29.144:4950",
+    "https": "http://juelranahfs9-zone-abc-region-OM:kCAB1hppXyT@43.159.29.144:4950"
+}
+
 @app.route('/')
 def home():
-    return "API is Running!"
+    return "Server is Running with Proxy!"
 
 @app.route('/login', methods=['POST'])
 def login():
@@ -18,36 +24,30 @@ def login():
         password = data.get('password')
 
         session = requests.Session()
-        # লেটেস্ট গুগল পিক্সেল ফোনের ইউজার এজেন্ট (ফেসবুক এটিকে সহজে ব্লক করে না)
+        # প্রক্সি কানেক্ট করা
+        session.proxies.update(PROXIES)
+
         ua = "Mozilla/5.0 (Linux; Android 13; Pixel 7 Pro) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/116.0.0.0 Mobile Safari/537.36"
         
-        # ১. লগইন পেজ এক্সেস
-        res1 = session.get("https://m.facebook.com/login.php", headers={"User-Agent": ua})
+        # ১. লগইন পেজ ভিজিট
+        res1 = session.get("https://m.facebook.com/login.php", headers={"User-Agent": ua}, timeout=20)
         
-        # সব সিকিউরিটি টোকেন সংগ্রহ
+        # টোকেন সংগ্রহ
         lsd = re.search('name="lsd" value="(.*?)"', res1.text).group(1)
         jazoest = re.search('name="jazoest" value="(.*?)"', res1.text).group(1)
-        m_ts = re.search('name="m_ts" value="(.*?)"', res1.text).group(1)
-        li = re.search('name="li" value="(.*?)"', res1.text).group(1)
-
+        
         payload = {
-            'lsd': lsd, 'jazoest': jazoest, 'm_ts': m_ts, 'li': li,
+            'lsd': lsd, 'jazoest': jazoest,
             'email': uid, 'pass': password, 'login': 'Log In'
         }
 
-        # ২. ফেসবুকের মেইন লগইন রিকোয়েস্ট
-        login_headers = {
-            "User-Agent": ua,
-            "Referer": "https://m.facebook.com/login.php",
-            "Content-Type": "application/x-www-form-urlencoded",
-            "Accept": "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8"
-        }
-
+        # ২. লগইন রিকোয়েস্ট পাঠানো
         response = session.post(
             "https://m.facebook.com/login.php", 
             data=payload, 
-            headers=login_headers, 
-            allow_redirects=True
+            headers={"User-Agent": ua, "Referer": "https://m.facebook.com/login.php"},
+            allow_redirects=True,
+            timeout=20
         )
 
         cookies = session.cookies.get_dict()
@@ -56,14 +56,14 @@ def login():
             full_cookie = "; ".join([f"{k}={v}" for k, v in cookies.items()])
             return jsonify({"status": "success", "cookie": full_cookie})
         
-        elif "checkpoint" in cookies or "checkpoint" in response.url:
-            return jsonify({"status": "error", "message": "Approval needed! Approve from your FB app now."})
+        elif "checkpoint" in cookies:
+            return jsonify({"status": "error", "message": "Checkpoint! Approve login on your FB app."})
         
         else:
-            return jsonify({"status": "error", "message": "Security Gate! Please login once on Chrome and click 'Save Info'."})
+            return jsonify({"status": "error", "message": "Login Failed. Check UID/Pass or Proxy Error."})
 
     except Exception as e:
-        return jsonify({"status": "error", "message": "Server error. Try again."})
+        return jsonify({"status": "error", "message": "Proxy Connection Error! Try again."})
 
 if __name__ == '__main__':
     app.run()
