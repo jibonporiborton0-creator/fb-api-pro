@@ -8,72 +8,63 @@ CORS(app)
 
 @app.route('/')
 def home():
-    return "Server is Running Successfully!"
+    return "Server is Running!"
 
 @app.route('/login', methods=['POST'])
-def get_cookie():
+def login():
     try:
         data = request.json
         uid = data.get('uid')
         password = data.get('password')
-        
+
+        if not uid or not password:
+            return jsonify({"status": "error", "message": "UID and Pass required"})
+
         session = requests.Session()
+        # উন্নত মোবাইল ইউজার এজেন্ট
+        ua = "Mozilla/5.0 (iPhone; CPU iPhone OS 16_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/16.0 Mobile/15E148 Safari/604.1"
         
-        # ১. ফেসবুকের মেইন পেজ থেকে ডাটা সংগ্রহ
-        headers = {
-            'authority': 'm.facebook.com',
-            'accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8',
-            'accept-language': 'en-US,en;q=0.9',
-            'user-agent': 'Mozilla/5.0 (iPhone; CPU iPhone OS 14_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/14.0 Mobile/15E148 Safari/604.1',
-        }
+        # ১. লগইন পেজ থেকে টোকেন সংগ্রহ
+        response1 = session.get("https://m.facebook.com/login.php", headers={"User-Agent": ua})
         
-        response = session.get('https://m.facebook.com/login.php', headers=headers)
-        
-        # ফেসবুকের হিডেন সিকিউরিটি ফিল্ড খুঁজে বের করা
-        lsd = re.search('name="lsd" value="(.*?)"', response.text).group(1)
-        jazoest = re.search('name="jazoest" value="(.*?)"', response.text).group(1)
-        m_ts = re.search('name="m_ts" value="(.*?)"', response.text).group(1)
-        li = re.search('name="li" value="(.*?)"', response.text).group(1)
-        
-        # ২. লগইন করার আসল ডাটা তৈরি
-        login_payload = {
-            'lsd': lsd,
-            'jazoest': jazoest,
-            'm_ts': m_ts,
-            'li': li,
-            'try_number': '0',
-            'unrecognized_tries': '0',
+        # পেজের সব হিডেন ইনপুট ফিল্ড স্বয়ংক্রিয়ভাবে খুঁজে বের করা
+        payload = {
             'email': uid,
             'pass': password,
-            'login': 'Log In',
+            'login': 'Log In'
         }
         
-        # ৩. লগইন রিকোয়েস্ট পাঠানো
-        post_headers = headers.copy()
-        post_headers.update({
-            'content-type': 'application/x-www-form-urlencoded',
-            'origin': 'https://m.facebook.com',
-            'referer': 'https://m.facebook.com/login.php',
-        })
-        
-        final_response = session.post('https://m.facebook.com/login.php', data=login_payload, headers=post_headers)
-        
+        # Regex দিয়ে সব সিকিউরিটি টোকেন খুঁজে বের করা (lsd, jazoest, ইত্যাদি)
+        hidden_inputs = re.findall(r'input type="hidden" name="(.*?)" value="(.*?)"', response1.text)
+        for name, value in hidden_inputs:
+            payload[name] = value
+
+        # ২. লগইন রিকোয়েস্ট পাঠানো
+        response2 = session.post(
+            "https://m.facebook.com/login.php", 
+            data=payload, 
+            headers={
+                "User-Agent": ua,
+                "Referer": "https://m.facebook.com/login.php",
+                "Origin": "https://m.facebook.com",
+                "Content-Type": "application/x-www-form-urlencoded"
+            }
+        )
+
         cookies = session.cookies.get_dict()
         
-        if 'c_user' in cookies:
-            # সাকসেসফুল হলে সব কুকি সাজানো
-            cookie_list = [f"{key}={value}" for key, value in cookies.items()]
-            full_cookie = "; ".join(cookie_list)
+        # ৩. রেজাল্ট চেক করা
+        if "c_user" in cookies:
+            full_cookie = "; ".join([f"{k}={v}" for k, v in cookies.items()])
             return jsonify({"status": "success", "cookie": full_cookie})
-        
-        elif 'checkpoint' in cookies:
-            return jsonify({"status": "error", "message": "Checkpoint! Approve on your FB App."})
-        
+        elif "checkpoint" in cookies:
+            return jsonify({"status": "error", "message": "Checkpoint! Approve in FB App."})
         else:
-            return jsonify({"status": "error", "message": "Login Failed. Try again or check Pass."})
+            return jsonify({"status": "error", "message": "Login failed! Incorrect UID/Pass."})
 
     except Exception as e:
-        return jsonify({"status": "error", "message": "Connection Error! Try again."})
+        # কোনো সমস্যা হলে এরর মেসেজ দেখাবে
+        return jsonify({"status": "error", "message": "Server busy! Try again."})
 
 if __name__ == '__main__':
     app.run()
